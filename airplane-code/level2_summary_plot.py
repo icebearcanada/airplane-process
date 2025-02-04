@@ -12,8 +12,6 @@ import matplotlib.dates as mdates
 import datetime
 import csv
 import glob
-import traffic
-from traffic.data import opensky
 
 
 SMALL_SIZE = 30 #38
@@ -31,26 +29,28 @@ fig_width_inches = 17
 fig_height_inches = 10
 
 if __name__ == "__main__":
-    # get the aircraft data
-    bounds = (-109.375, 50.771, -106.0, 52.765) # west, south, east, north
-
     # get the level 2 files
-    y = 2022
+    y = 2020
     m = 12
     d = 13
     level2_files = [
-            f'/mnt/NAS/airplane-data/L2/{y}_{m:02d}_{d:02d}/ib3d_normal_swht_{y}_{m:02d}_{d:02d}_prelate_bakker.h5'
+            f'/mnt/NAS/airplane-data/L2-no-corrections/{y}_{m:02d}_{d:02d}/ib3d_normal_swht_{y}_{m:02d}_{d:02d}_prelate_bakker.h5',
+            f'/mnt/NAS/airplane-data/L2-proper-correction/{y}_{m:02d}_{d:02d}/ib3d_normal_swht_{y}_{m:02d}_{d:02d}_prelate_bakker.h5',
+            #f'/mnt/NAS/airplane-data/L2-no-indices-correction/{y}_{m:02d}_{d:02d}/ib3d_normal_swht_{y}_{m:02d}_{d:02d}_prelate_bakker.h5',
+            #f'/mnt/NAS/airplane-data/L2-both-corrections/{y}_{m:02d}_{d:02d}/ib3d_normal_swht_{y}_{m:02d}_{d:02d}_prelate_bakker.h5',
+            #f'/mnt/NAS/airplane-data/L2-no-samples-correction/{y}_{m:02d}_{d:02d}/ib3d_normal_swht_{y}_{m:02d}_{d:02d}_prelate_bakker.h5'
+            
             ]
     #level2_files = glob.glob(f'/mnt/NAS/airplane-data/L2/*/ib3d_normal_swht_20*.h5')
-    # descriptor for this run
+    # title descriptor for this run
     descriptor = 'Airplane' #'No corrections on antennas 5 and 6'
 
     # set up vectorized timestamp converter
     vutcfromtimestamp = np.vectorize(datetime.datetime.utcfromtimestamp)
 
     # time interval of interest
-    t_start = [2023,12,13,0,15,0]
-    t_end   = [2023,12,13,0,18,0]
+    t_start = [2020,12,13,0,0,0]
+    t_end   = [2020,12,14,0,0,0]
     
     t_start = [y,m,d,0,0,0]
     t_end   = [y,m,d,23,59,59]
@@ -98,6 +98,14 @@ if __name__ == "__main__":
     ax_el.xaxis.set_major_locator(locator)
     ax_el.xaxis.set_major_formatter(formatter)
 
+    fig_rti, ax_rti = plt.subplots()
+    fig_rti.set_size_inches(fig_width_inches, fig_height_inches)
+    ax_rti.set_ylabel('Total Range [km]')
+    ax_rti.set_xlabel('Time')
+    ax_rti.set_title(f'RTI - {descriptor}')
+    ax_rti.xaxis.set_major_locator(locator)
+    ax_rti.xaxis.set_major_formatter(formatter)
+    
     for file in level2_files:
         print(file)
         f = h5py.File(file)
@@ -113,67 +121,9 @@ if __name__ == "__main__":
         time = f['data']['time'][:]
         utc_time = vutcfromtimestamp(time)
         time_filter = (utc_time < end_time) & (utc_time > start_time) 
-        elevation_filter = elevation < 20
-        altitude_filter = altitude < 20
-        range_filter = rf_distance < 400
-        time_filter = time_filter & range_filter & elevation_filter & altitude_filter
+        #range_filter = (rf_distance < 400) & (rf_distance > 100)
+        #time_filter = time_filter & range_filter
         
-        """
-        current_minute = utc_time[time_filter][0]
-        for j in range(utc_time[time_filter].shape[0] - 1):
-            this_timestamp = utc_time[time_filter][j]
-            next_timestamp = utc_time[time_filter][j+1]
-            if next_timestamp - this_timestamp >= datetime.timedelta(minutes=1):
-                
-                start_time = current_minute
-                current_minute = next_timestamp
-                current_minute_incremented = current_minute + datetime.timedelta(minutes=1)
-                
-                # get aircraft data for the airplane timeframe
-                aircrafts_db = opensky.history(
-                                    current_minute,
-                                    current_minute_incremented,
-                                    bounds=bounds)
-                
-                # plot aircraft tracks
-                try:
-                    for i in range(len(aircrafts_db)):
-                        ax_ll.plot(aircrafts_db[i].data.longitude, aircrafts_db[i].data.latitude)
-                    #ax_alt.scatter(aircrafts_db[i].data.time, aircrafts_db[i].data.altitude) # trying to plot the time here
-                except Exception:
-                    continue
-        """
-            
-        airplane_start = utc_time[time_filter][0]
-        for j in range(utc_time[time_filter].shape[0] - 1):
-            this_timestamp = utc_time[time_filter][j]
-            next_timestamp = utc_time[time_filter][j+1]
-            if next_timestamp - this_timestamp >= datetime.timedelta(minutes=1): # if we are going to move onto another airplane
-                airplane_end = this_timestamp
-                
-                # get aircraft data for the airplane timeframe
-                aircrafts_db = opensky.history(
-                                    airplane_start,
-                                    airplane_end,
-                                    bounds=bounds)
-
-                # plot aircraft tracks
-                try:
-                    for i in range(len(aircrafts_db)):
-                        ax_ll.plot(aircrafts_db[i].data.longitude, aircrafts_db[i].data.latitude)
-                    #ax_alt.scatter(aircrafts_db[i].data.time, aircrafts_db[i].data.altitude) # trying to plot the time here
-                except Exception:
-                    continue
-
-                airplane_start = next_timestamp
-
-
-
-        print(utc_time[time_filter][0])
-        print(utc_time[time_filter][-1])
-        print(longitude[time_filter].shape)	
-
-
         velocity_azimuth = f['data']['velocity_azimuth'][:]
         velocity_elevation = f['data']['velocity_elevation'][:]
         velocity_magnitude = f['data']['velocity_magnitude'][:]
@@ -188,7 +138,8 @@ if __name__ == "__main__":
         ax_az.scatter(utc_time[time_filter], azimuth[time_filter])
         ax_el.scatter(utc_time[time_filter], elevation[time_filter])
 
-        # plot 2d unfolded 3d box lat/lon/alt
+        # plot rti
+        ax_rti.scatter(utc_time, rf_distance)
 
-
+    ax_alt.legend(['no corrections', 'proper correction'])
     plt.show()
