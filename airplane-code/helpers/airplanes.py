@@ -108,7 +108,9 @@ def angular_mean_and_stdev(angles):
 
     # stdev
     n = angles.shape[0]
+    print(average_angle)
     stdev = np.ma.sqrt(-2 * np.ma.log(np.ma.abs( (1/n) * np.ma.sum(np.ma.exp(1j * angles)) )))
+    print(stdev)
 
     return average_angle, stdev
 
@@ -248,7 +250,6 @@ def load_level1_airplane_xspectra(files, t_start, t_end):
         return 0, 0
 
 
-
 def unwrap_phase(phasec, tol):
     # wherever the difference in phase is equal to or greater than 180, ALL values past that point should be adjusted.
     # imagine a ripple effect down the sequence
@@ -260,14 +261,26 @@ def unwrap_phase(phasec, tol):
         for i in range(phase_diff.shape[0]):
             if phase_diff[i] > 180 - tol:
                 phase[i+1:] = phase[i+1:] - 360
-                break
+                #break
             elif phase_diff[i] < -180 + tol:
                 phase[i+1:] = phase[i+1:] + 360
-                break
+                #break
             if i == phase_diff.shape[0]-1:
                 last_point = True        
     return phase
 
+def manually_adjust_phase(vis_phase, year, month, day, airplane_idx):
+    # manual adjustments cause unwrapping phase is hard
+    adjusted_phase = np.copy(vis_phase)
+    
+    key = f'{year:04d}-{month:02d}-{day:02d}_{airplane_idx}'
+    list_of_adjustments = manual_adjustments[key]
+    for adj in list_of_adjustments:
+        index = adj[0]
+        shift = adj[1]
+        adjusted_phase[index:] += shift
+
+    return adjusted_phase
 
 # Function to perform linear regression with a known slope
 def linear_regression_with_known_slope2(x, y, m):
