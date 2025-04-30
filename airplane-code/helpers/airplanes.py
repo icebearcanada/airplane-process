@@ -102,17 +102,14 @@ def angular_mean_and_stdev(angles):
     """
 
     # mean
-    x = np.ma.sum(np.ma.cos(angles))
-    y = np.ma.sum(np.ma.sin(angles))
+    x = np.nansum(np.ma.cos(angles))
+    y = np.nansum(np.ma.sin(angles))
     average_angle = np.ma.arctan2(y, x)
-
     # stdev
-    n = angles.shape[0]
-    print(average_angle)
-    stdev = np.ma.sqrt(-2 * np.ma.log(np.ma.abs( (1/n) * np.ma.sum(np.ma.exp(1j * angles)) )))
-    print(stdev)
-
+    n = np.count_nonzero(~np.isnan(angles))
+    stdev = np.ma.sqrt(-2 * np.ma.log(np.ma.abs( (1/n) * np.nansum(np.ma.exp(1j * angles)) )))
     return average_angle, stdev
+
 
 def angular_median(angles):
     """
@@ -132,20 +129,22 @@ def angular_median(angles):
         the standard deviation of the angles [rad]
     """
     # prep the arrays
-    gap = np.deg2rad(180)
-    angles_copy = np.copy(angles)
+    gap = np.deg2rad(50)
+    angles_copy = np.ma.copy(angles)
+    angles_copy = angles_copy[~np.isnan(angles_copy)]
     sorted_angles = np.sort(angles_copy)
 
     # find the consecutive differences in the angles
     diffs = np.ma.diff(sorted_angles)
     if np.ma.max(diffs) >= gap:
-        new_first_idx = np.ma.argmax(diffs)
+        new_first_idx = np.ma.argmax(diffs) + 1
     else:
         new_first_idx = 0
 
+    
     # make the new set of indices based on the difference being greater than 180 or not
     idxs = []
-    idxs.append(np.arange(new_first_idx, angles.shape[0]))
+    idxs.append(np.arange(new_first_idx, np.count_nonzero(~np.isnan(angles)))) #angles.shape[0]))
     idxs.append(np.arange(0, new_first_idx))
     idxs = np.hstack(idxs)
 
@@ -153,6 +152,7 @@ def angular_median(angles):
     median = sorted_angles[idxs[idxs.shape[0] // 2]]
     
     return median
+
 
 def retrieve_airplane_data(utc_time, time_filter, bounds):
     """
@@ -300,12 +300,18 @@ def datetime_to_seconds_since_epoch(datetime_array):
     return seconds_since_epoch
 
 
-def save_aircrafts_dbs(aircrafts_dbs, date_str):
+def save_aircrafts_dbs(aircrafts_dbs, date_str, filtered=False):
+    """
+    filtered: True if the aircrafts_dbs has been filtered, will save to a different folder
+    """
     import pickle
     
-    # open a file, where you ant to store the data
-    file = open(f'aircrafts_dbs_{date_str}.pckl', 'wb')
-    
+    # open a file where you want to store the data
+    if not filtered:
+        file = open(f'aircrafts_dbs_{date_str}.pckl', 'wb')
+    else:
+        file = open(f'filtered_aircraft/aircrafts_dbs_filtered_{date_str}.pckl', 'wb')
+        
     # dump information to that file
     pickle.dump(aircrafts_dbs, file)
     
@@ -313,3 +319,39 @@ def save_aircrafts_dbs(aircrafts_dbs, date_str):
     file.close()
 
     return
+
+def rle(inarray):
+    """ 
+    run length encoding. Partial credit to R rle function. 
+    Multi datatype arrays catered for including non Numpy
+    returns: tuple (runlengths, startpositions, values) 
+
+    example return:
+    rle([True, True, True, False, True, False, False])
+    Out[8]: 
+    (array([3, 1, 1, 2]),
+     array([0, 3, 4, 5]),
+     array([ True, False,  True, False], dtype=bool))
+    
+    """
+    ia = np.asarray(inarray)                # force numpy
+    n = len(ia)
+    if n == 0: 
+        return (None, None, None)
+    else:
+        y = ia[1:] != ia[:-1]               # pairwise unequal (string safe)
+        i = np.append(np.where(y), n - 1)   # must include last element posi
+        z = np.diff(np.append(-1, i))       # run lengths
+        p = np.cumsum(np.append(0, z))[:-1] # positions
+        return(z, p, ia[i])
+
+
+def filter_aircraft_db(aircrafts_dbs, airplane_xspectra, airplane_echo_time):
+    """
+    Filters an aircraft database to only contain airplanes that are relevant to ICEBEAR.
+    This is performed using various criteria. See function comments for details
+    """
+
+
+
+    
