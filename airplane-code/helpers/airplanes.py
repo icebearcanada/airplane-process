@@ -11,6 +11,9 @@ import h5py
 from sklearn.linear_model import LinearRegression
 import pickle
 
+# convert feet to meters
+FT_TO_M = 1 / 3.281
+
 def find_aer_from_receiver(target_lat, target_lon, target_alt):
     """
     Finds the azimuth, elevation and range of a target or set of targets from the hard coded radar receiver
@@ -135,8 +138,11 @@ def angular_median(angles):
     sorted_angles = np.sort(angles_copy)
 
     # find the consecutive differences in the angles
+    if sorted_angles.shape[0] == 1:
+        median = sorted_angles[0]
+        return median
     diffs = np.ma.diff(sorted_angles)
-    if np.ma.max(diffs) >= gap:
+    if np.nanmax(diffs) >= gap:
         new_first_idx = np.ma.argmax(diffs) + 1
     else:
         new_first_idx = 0
@@ -350,8 +356,68 @@ def filter_aircraft_db(aircrafts_dbs, airplane_xspectra, airplane_echo_time):
     """
     Filters an aircraft database to only contain airplanes that are relevant to ICEBEAR.
     This is performed using various criteria. See function comments for details
-    """
+    """    
 
-
-
+    for db in aircrafts_dbs:
+        # db is a database of every airplane in the timeframe.
+        if db == None:
+            aircrafts_dbs.remove(db)
+            continue
+            
+        db.clean_invalid()
+            
+        # db[i].data.long/lat is the time series of data for one airplane (i)
+        for flight in db: # db[i] is a single airplane in the timeframe.
+            # indexes in db continue through multiple airplanes, so need to manually find the indices for this airplane
+            start_idx = flight.data.index[0]
+            end_idx = flight.data.index[-1]
     
+            # we don't want to look at the short airplanes
+            if end_idx - start_idx <= 6:
+                # this is a horrible line, but just says to remove all entries in db where the icao24 matches the icao24 of this flight
+                # i.e., remove this flight
+                db.drop(index=db.data['icao24'][db.data['icao24'] == str(flight.icao24)].index, inplace=True)
+                continue
+
+            # sometimes airplane have NaN altitude data
+            if np.count_nonzero(~np.isnan(flight.data.altitude)) == 0:
+                db.drop(index=db.data['icao24'][db.data['icao24'] == str(flight.icao24)].index, inplace=True)
+                continue
+ 
+
+            # we can filter based on geographic values. this is a remnant of loading aircraft data with expanded geographic bounds.
+            if np.any(flight.data.latitude > 52.25) or np.any(flight.data.latitude < 50.8) \
+                or np.any(flight.data.longitude > -106.4) or np.any(flight.data.longitude < -109.375):
+                
+                db.drop(index=db.data['icao24'][db.data['icao24'] == str(flight.icao24)].index, inplace=True)
+                continue
+        
+            # from the airplane's geographic latitude/longitude/altitude, find the azimuth/elevation/altitude of the airplane from the receiver
+            # this azimuth is measured EAST OF NORTH
+            az, el, slant_range = find_aer_from_receiver(flight.data.latitude, flight.data.longitude, flight.data.altitude * FT_TO_M)
+            # still east of north, but adjusted to be -180 to 180 instead of 0 to 360
+            az = np.where(az > 180.0, az - 360.0, az)
+
+            # based on empirical observations, the airplanes all fall within a fairly narrow az/el volume
+            if np.all(el > 25) or np.all(az < -128) or np.all(az > -122):
+                db.drop(index=db.data['icao24'][db.data['icao24'] == str(flight.icao24)].index, inplace=True)
+                continue
+            
+            # now, we can compare this airplane data to baseline data and based on the quality of the comparison, remove some airplanes
+            this_airplane_db_time = flight.data.timestamp[:] # .to_pydatetime().replace(tzinfo=timezone.utc)
+            this_airplane_echo_indices = np.isin(airplane_echo_time, this_airplane_db_time) # indices in ICEBEAR data where timestamps are in the airplane data time
+            this_airplane_xspectra = airplane_xspectra[this_airplane_echo_indices, :] # xspectra corresponding to those indices
+            this_airplane_echo_time = airplane_echo_time[this_airplane_echo_indices] # time corresponding to those indices
+
+            # sometimes there is not enough data points in the ICEBEAR data
+            if this_airplane_xspectra.shape[0] <= 7:
+                db.drop(index=db.data['icao24'][db.data['icao24'] == str(flight.icao24)].index, inplace=True)
+                continue
+                
+            # sometimes the data is dead with no phase
+            if np.median(np.imag(this_airplane_xspectra)) == 0.0:
+                db.drop(index=db.data['icao24'][db.data['icao24'] == str(flight.icao24)].index, inplace=True)
+                continue
+
+    # done filtering. return the modified aircrafts_db
+    return aircrafts_dbs
