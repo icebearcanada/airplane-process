@@ -210,6 +210,7 @@ def load_level1_airplane_xspectra(files, t_start, t_end):
     ti_string = f'{t_start.hour:02d}{t_start.minute:02d}{t_start.second:02d}000'
     tf_string = f'{t_end.hour:02d}{t_end.minute:02d}{t_end.second:02d}000'
 
+    spectra = []
     xspectra = []
     time_array = []
     
@@ -233,6 +234,7 @@ def load_level1_airplane_xspectra(files, t_start, t_end):
             range_filter = (rf_distance >= 245.0) & (rf_distance <= 260.0)
 
             # append the xspectra and timestamps using the range filter
+            spectra.append(f['data'][key]['xspectra'][range_filter, :])
             xspectra.append(f['data'][key]['xspectra'][range_filter, :])
             time = f['data'][key]['time'][:]
             hour = time[0]
@@ -249,11 +251,12 @@ def load_level1_airplane_xspectra(files, t_start, t_end):
     # concatenate into a single array
     if xspectra != []:
         xspectra = np.concatenate(xspectra, axis=0)
+        spectra = np.concatenate(spectra, axis=0)
         time_array = np.concatenate(time_array, axis=0)
         print(xspectra.shape)        
-        return xspectra, time_array
+        return xspectra, spectra, time_array
     else:
-        return 0, 0
+        return 0, 0, 0
 
 
 def unwrap_phase(phasec, tol):
@@ -421,3 +424,28 @@ def filter_aircraft_db(aircrafts_dbs, airplane_xspectra, airplane_echo_time):
 
     # done filtering. return the modified aircrafts_db
     return aircrafts_dbs
+
+
+def find_kappa(rho_rf, azimuth, elevation, range_filter):
+    rho_d  = (TX_RX_DISTANCE) * 1.0e3
+    
+    azimuth = np.where(azimuth < 0.0, azimuth + 360.0, azimuth)
+    azimuth = np.deg2rad(azimuth)
+    elevation = np.deg2rad(elevation)
+    
+    x_t, y_t, z_t = pm.geodetic2ecef(TX[0], TX[1], TX[2], ell=pm.Ellipsoid.from_name("wgs84"), deg=True) # ecef coords for transmitter
+    az_rt, el_rt, range_rt = pm.ecef2aer(x_t, y_t, z_t, RX[0], RX[1], RX[2], ell=pm.Ellipsoid.from_name("wgs84"), deg=True) # vector from receiver to transmitter in az, el, range
+    
+    u_d = np.array([np.sin(np.deg2rad(az_rt)) * np.cos(np.deg2rad(el_rt)),
+                     np.cos(np.deg2rad(az_rt)) * np.cos(np.deg2rad(el_rt)),
+                     np.sin(np.deg2rad(el_rt))])
+    
+    u_rho = np.array([np.sin(azimuth[range_filter]) * np.cos(elevation[range_filter]),
+                    np.cos(azimuth[range_filter]) * np.cos(elevation[range_filter]),
+                    np.sin(elevation[range_filter])])
+    
+    cos_kappa = np.dot(u_rho.T, u_d)
+
+    azimuth = np.rad2deg(azimuth)
+    elevation = np.rad2deg(elevation)
+    return cos_kappa
